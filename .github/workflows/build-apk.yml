@@ -11,6 +11,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    # Needed so the last step can commit the finished APK back into the repo.
+    permissions:
+      contents: write
+
     steps:
       - name: Get the code
         uses: actions/checkout@v4
@@ -44,3 +48,16 @@ jobs:
           name: MyTasks-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      # Puts the APK in the repo under dist/, which gives a direct download link
+      # that works from a phone browser. The default token does not re-trigger
+      # workflows, so this push cannot loop back into another build.
+      - name: Publish the APK into the repo
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/app-debug.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f dist/app-debug.apk
+          git commit -m "Publish debug APK [skip ci]" || echo "APK unchanged, nothing to commit"
+          git push
