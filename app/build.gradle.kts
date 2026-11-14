@@ -17,13 +17,37 @@ android {
         versionName = "1.0"
     }
 
+    // A release APK has to be signed with YOUR key, the same one every time.
+    // The key never sits in this repo: GitHub holds it as an encrypted secret and
+    // hands it to the build through environment variables.
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("KEYSTORE_FILE")
+            if (keystorePath != null) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 deletes unused code and renames what is left, and the resource
+            // shrinker drops unused drawables and strings. Together they take the
+            // APK from about 16 MB down to a few.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Sign only when the key is actually present, so a plain local build
+            // of the debug variant still works with no key set up.
+            if (System.getenv("KEYSTORE_FILE") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

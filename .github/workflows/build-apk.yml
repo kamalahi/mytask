@@ -1,7 +1,5 @@
 name: Build APK
 
-# Runs when you push to the main branch, or when you press the button
-# on the Actions tab yourself.
 on:
   push:
     branches: [ main ]
@@ -11,9 +9,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    # Needed so the last step can commit the finished APK back into the repo.
+    # Needed so the last step can commit the finished APKs back into the repo.
     permissions:
       contents: write
+
+    # Lifted to the job so the steps below can test whether the key exists.
+    # A secret cannot be read inside an "if:" directly, an env var can.
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
     steps:
       - name: Get the code
@@ -26,12 +29,9 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # The runner already ships with the Android SDK, so this only adds the
-      # exact platform and build-tools this project asks for.
       - name: Install the Android SDK pieces this project needs
         run: |
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -1)
-          echo "Using $SDKMANAGER"
           yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
           "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" > /dev/null
 
@@ -41,23 +41,44 @@ jobs:
       - name: Build the debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-      # The APK lands here as a downloadable zip on the run's page.
-      - name: Upload the APK
+      # Turns the base64 secret back into the .jks file and tells the next step
+      # where it landed. Skipped entirely when no key has been added yet.
+      - name: Decode the signing key
+        if: env.KEYSTORE_BASE64 != ''
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build the signed release APK
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Upload the APKs
         uses: actions/upload-artifact@v4
         with:
-          name: MyTasks-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: MyTasks-apk
+          path: app/build/outputs/apk/**/*.apk
           if-no-files-found: error
 
-      # Puts the APK in the repo under dist/, which gives a direct download link
-      # that works from a phone browser. The default token does not re-trigger
-      # workflows, so this push cannot loop back into another build.
-      - name: Publish the APK into the repo
+      # Copies whatever got built into dist/, which gives plain download links
+      # that work from a phone browser.
+      - name: Publish the APKs into the repo
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk dist/app-debug.apk
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk dist/app-release.apk
+            echo "release APK published"
+          else
+            echo "no signed release APK this run"
+          fi
+          ls -lh dist/
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f dist/app-debug.apk
-          git commit -m "Publish debug APK [skip ci]" || echo "APK unchanged, nothing to commit"
+          git add -f dist/
+          git commit -m "Publish APKs [skip ci]" || echo "nothing changed"
           git push
