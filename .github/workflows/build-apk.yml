@@ -22,14 +22,20 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - name: Set up the Android SDK
-        uses: android-actions/setup-android@v3
+      # The runner already ships with the Android SDK, so this only adds the
+      # exact platform and build-tools this project asks for.
+      - name: Install the Android SDK pieces this project needs
+        run: |
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -1)
+          echo "Using $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" > /dev/null
 
       - name: Make gradlew runnable
         run: chmod +x gradlew
 
       - name: Build the debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       # The APK lands here as a downloadable zip on the run's page.
       - name: Upload the APK
